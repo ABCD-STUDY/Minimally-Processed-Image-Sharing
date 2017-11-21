@@ -34,7 +34,7 @@ site="$1"
 
 # check if miNDAR database exists
 if [ ! -e "${db}" ]; then
-   echo "Error: could not find the miNDAR database required in ${db}"
+   echo "Error: could not find miNDAR database: ${db}"
    exit -1
 fi
 
@@ -44,7 +44,7 @@ qc=${dir}/abcd_qc_t1.csv
 
 # check if the QC information exists
 if [ ! -e "${qc}" ]; then 
-   echo "Error: could not find QC information"
+   echo "Error: could not find QC information: ${qc}"
    exit -1
 fi
 
@@ -58,12 +58,28 @@ while read -r line; do
     # subject=`echo $line | cut -d',' -f1`
     # echo "PROCESS: $subject"
 
+
+    echo ""
+    echo "PROCESSING: qc_line: $line"
+    subject=`echo $line | cut -d',' -f1`
+    echo "PROCESSING: subject: $subject"
+
+
     # share a single participants T1 minimally preprocessed data
     d=/space/syn05/1/data/MMILDB/DAL_ABCD_TEST/proc/
     #subject=NDAR_INV5YLL09V1
     subject=`echo $subject | cut -d'_' -f2`
 
+
+    echo "PROCESSING: subject: $subject"
+
+
     T1=`ls ${d}/*${subject}*/MPR_res.mgz 2> /dev/null | head -1`
+
+
+    echo "PROCESSING: min.processed image file: $T1"
+
+
     if [ ! -e "${T1}" ]; then
         echo "file could not be found"
         continue
@@ -74,15 +90,25 @@ while read -r line; do
     # echo `ls /fast-track/*/*${subject}*ABCD-T1*.tgz | head -1`
 
 
-    # Get file name, remove path, and check if it is present in NDA
-    file_path=`ls /fast-track/*/*${subject}*ABCD-T1*.tgz 2> /dev/null | head -1`
-    if [ ! -e "$file_path" ]; then
+    # Get file name, remove path, and check if it is fast-track shared, and present in NDA
+    fastrk_file_path=`ls /fast-track/*/*${subject}*ABCD-T1*.tgz 2> /dev/null | head -1`
+
+
+
+    echo "PROCESSING: fastrk_file_path: $fastrk_file_path"
+
+
+    if [ ! -e "$fastrk_file_path" ]; then
        echo "file could not be found"
        continue
     fi
-    echo "getting ABCD-T1 as : $file_path"
-    file_name=`echo ${file_path} | rev | cut -d'/' -f1 | rev`
+    echo "getting ABCD-T1 as : $fastrk_file_path"
+    file_name=`echo ${fastrk_file_path} | rev | cut -d'/' -f1 | rev`
     # echo "filename is : $file_name"
+
+
+    echo "PROCESSING: filename: $file_name"
+
 
     # Documentation
     # "subjectkey",
@@ -116,6 +142,11 @@ while read -r line; do
     echo $cmd
     echo $cmd >> ${dir}/log.log
     exec $cmd 2>&1 | tee -a ${dir}/log.log
+
+
+    echo ""
+    exit 0
+
 
     #file_name=${file_name#*/} 
     #file_name=${file_name#*/} 

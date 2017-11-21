@@ -112,7 +112,7 @@ if __name__ == "__main__":
         sys.exit(0)
     # The NDAR databae has some repeated series, with different IDs' get the last one
     # For now I will take the first one
-    nda_id = rs_msg.split('\n', 1)[-1]
+    nda_id = rs_msg.split('\n', 1)[-1].strip()
     print('nda_id =', nda_id )
 
     if not os.path.exists(outdir):
@@ -123,24 +123,22 @@ if __name__ == "__main__":
             log.error("Error: could not create output directory %s" % outdir)
             sys.exit(0)
 
+
     # --------------------------- Generate output file ---------------------------
-    abcd_type = 'ABCD-MPROC-'
 
-    ss = FsTk_fname.split( '/' )
-    if len(ss) < 2:
-        print('Error: ----')
-        exit()
-    fname_out = ss[-1]
+    # Set output file name
+    ptrn        = 'ABCD-'
+    minprc_type = 'ABCD-MPROC-'
 
-    ptrn = 'ABCD-'
-    tgt  = abcd_type
-    ss = fname.split( tgt )
+    ss = fname.split( ptrn )
     if len(ss) != 2:
         print('Error: ----')
         exit()
+    fname_out = ss[0] + minprc_type + ss[1]
 
-    fname_out = ss[0] + tgt + ss[1]
 
+    # Set output file-name extension
+    fname_bas = ''
     fxpos = fname_out.rfind('.')
     if fxpos > 0:
         if fxpos > (len(fname_out) - 5):   # The rightmost '.' is near the end of filename, and thus consistent with extension
@@ -153,23 +151,25 @@ if __name__ == "__main__":
         else:
             print('Error: invalid output file name')
             exit()
-
     if len(fname_bas) > 0:
         fname_out = fname_bas + '.nii'
-
     fname_out = outdir + '/' + fname_out
 
-    print( '\nGenerating nifti file:', fname_out, '...' )
 
+    print('Generating nifti file:', fname_out, '...')
     cmnd = '/usr/pubsw/packages/freesurfer/RH4-x86_64-R530/bin/mri_convert'
-    rs = subprocess.run( [cmnd, '--out_type nii', '-i', fname, '-o', fname_out], stdout=subprocess.PIPE, stderr=subprocess.PIPE )
+
+    # print('cmnd: ', ' '.join([cmnd, '-i', FsTk_fname, '-o', fname_out]) )
+
+    rs = subprocess.run( [cmnd, '-i', FsTk_fname, '-o', fname_out], stdout=subprocess.PIPE, stderr=subprocess.PIPE )
     rs_ok  = (rs.returncode == 0)
     rs_msg = rs.stdout.decode("utf-8")
     if not rs_ok:
-        print('Error: unable to convert file', fname )
+        print('Error: unable to convert file', FsTk_fname )
         sys.exit(0)
 
-    print()
+    print('done')
+    exit()
 
 
 # --------------------------------------------------------------------------------------------------------------------------------------------------------
