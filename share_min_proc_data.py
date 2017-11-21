@@ -25,6 +25,14 @@ import sys, getopt, os
 import logging, logging.handlers
 import subprocess
 
+import warnings
+warnings.simplefilter(action='ignore', category=UserWarning)
+warnings.simplefilter(action='ignore', category=FutureWarning)
+import pandas as pd
+pd.set_option('display.width', 512)
+
+
+
 # --------------------------------------------------------------------------------------------------------------------------------------------------------
 
 def show_program_description( nothing=0 ):
@@ -100,6 +108,7 @@ if __name__ == "__main__":
     print('share.py: FsTk_fname =', FsTk_fname)
     print('share.py: fname =', fname)
     print('share.py: outdir =', outdir)
+    # ---------------------------------------------------------------------------------------------------------------------
 
     # --------------------------- Check existence of files and directories ---------------------------
     # Get NDA series ID
@@ -122,10 +131,9 @@ if __name__ == "__main__":
             print("Error: could not create output directory %s" % outdir)
             log.error("Error: could not create output directory %s" % outdir)
             sys.exit(0)
+    # ---------------------------------------------------------------------------------------------------------------------
 
-
-    # --------------------------- Generate output file ---------------------------
-
+    # ----------------------------------------------- Generate output file ------------------------------------------------
     # Set output file name
     ptrn        = 'ABCD-'
     minprc_type = 'ABCD-MPROC-'
@@ -158,9 +166,6 @@ if __name__ == "__main__":
 
     print('Generating nifti file:', fname_out, '...')
     cmnd = '/usr/pubsw/packages/freesurfer/RH4-x86_64-R530/bin/mri_convert'
-
-    # print('cmnd: ', ' '.join([cmnd, '-i', FsTk_fname, '-o', fname_out]) )
-
     rs = subprocess.run( [cmnd, '-i', FsTk_fname, '-o', fname_out], stdout=subprocess.PIPE, stderr=subprocess.PIPE )
     rs_ok  = (rs.returncode == 0)
     rs_msg = rs.stdout.decode("utf-8")
@@ -170,6 +175,61 @@ if __name__ == "__main__":
 
     print('done')
     exit()
+    # ---------------------------------------------------------------------------------------------------------------------
+
+
+    # ------------------------------- Record this file upload in local and NDA databases ----------------------------------
+
+    # Assembly NDA required information from our local spreadsheets, file system, and image files' metadata
+    # We'll get additional info from fast-track NDA database, and NDA data dictionary
+
+    # Get subject's information from fast-track shared data NDA database
+    dat = pd.read_csv( db_name )
+    pd_record  =  dat[ dat['IMAGE03_ID'] == nda_id ]
+
+    # Calculate experiment ID fom image file metadata ----orsomethingelse?---- and NDA Data Dictionary
+    exp_id   = '---something---'   # From NDA Data Dictionary
+
+    # Calculate experiment information from image file metadata ---orwhere?---
+    exp_scan = '---something---'   # scan_type, e.g. Structural, T1, ...
+
+    # Calculate NDA file name based on ---?---
+    pd_record['COLLECTION_ID']
+    pd_record['DATASET_ID']
+    file_in_NDA = '---something---'
+
+    # Assembly meta-data record to be savev to NDA and our local database
+    # (according to specifications in fmriresults01_template.csv)
+    record = {"subjectkey":     pd_record['SUBJECTKEY'],
+              "src_subject_id": pd_record['SRC_SUBJECT_ID'],
+              "origin_dataset_id": '---?---',
+              "interview_date": pd_record['INTERVIEW_DATE'],
+              "interview_age":  pd_record['INTERVIEW_AGE'],
+              "gender":         pd_record['GENDER'],
+              "experiment_id":  exp_id,
+              "inputs":       '',
+              "img03_id":     nda_id,
+              "file_source":  file_in_NDA,    # ---?---
+              "job_name":     '',
+              "proc_types":   '',
+              "metric_files": '',
+              "pipeline":         '---Need to fill this field---',
+              "pipeline_script":  '---Need to fill this field---',
+              "pipeline_tools":   '---Need to fill this field---',
+              "pipeline_type":    '---Need to fill this field---',
+              "pipeline_version": '---Need to fill this field---',
+              "qc_fail_quest_reason": '---Need to fill this field---',
+              "qc_outcome":           '---Need to fill this field---',
+              "derived_files": '---Need to fill this field---',
+              "scan_type":     exp_scan,
+              "img03_id2":     '',
+              "file_source2":  '',
+              "session_det":   '',
+              "image_history": '' }
+
+    # ---------------------------------------------------------------------------------------------------------------------
+
+
 
 
 # --------------------------------------------------------------------------------------------------------------------------------------------------------
