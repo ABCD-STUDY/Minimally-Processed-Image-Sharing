@@ -75,6 +75,83 @@ def NDA_db_metadata( db_name, nda_id ):
 
     return record
 
+
+
+def NIfTI_file_generate( fname, type0, type_new ):
+    fname_bas = ''
+    fname_out_full = ''
+
+    # Set output file name
+    ss = fname.split( type0 )
+    if len(ss) != 2:
+        print('Error: ----')
+        return False, fname_bas, fname_out_full
+
+    fname_out = ss[0] + type_new + ss[1]
+
+    # Set output file-name extension
+    fxpos = fname_out.rfind('.')
+    if fxpos > 0:
+        if fxpos > (len(fname_out) - 5):   # The rightmost '.' is near the end of filename, and thus consistent with extension
+            fname_bas = fname_out[0:fxpos]
+        else:
+            fname_bas = fname_out
+    else:
+        if fxpos < 0:
+            fname_bas = fname_out
+        else:
+            print('Error: invalid output file name')
+            return False, fname_bas, fname_out_full
+
+    if len(fname_bas) > 0:
+        fname_out = fname_bas + '.nii'
+    fname_out_full = outdir + '/' + fname_out
+
+    print('Generating nifti file:', fname_out_full, '...')
+    cmnd = '/usr/pubsw/packages/freesurfer/RH4-x86_64-R530/bin/mri_convert'
+    rs = subprocess.run( [cmnd, '-i', FsTk_fname, '-o', fname_out_full], stdout=subprocess.PIPE, stderr=subprocess.PIPE )
+    rs_ok  = (rs.returncode == 0)
+    rs_msg = rs.stdout.decode("utf-8")
+    if not rs_ok:
+        print('Error: unable to convert file', fname_out_full )
+        return False, fname_bas, fname_out_full
+
+    print('done')
+    return True, fname_bas, fname_out_full
+
+
+
+def BIDS_file_generate( outdir, fname_bas, fname_out_full, nda ):
+    # The BIDS format specification is described in
+    # https://images.nature.com/original/nature-assets/sdata/2016/sdata201644/extref/sdata201644-s1.pdf
+
+    outtarname = ''.join([ os.path.abspath(outdir), os.path.sep, fname_bas, '.tgz' ])
+
+    # Check if file already exists. If it does, return False;  if not, continue:
+
+    subj  = nda['SUBJECTKEY'].replace('_','')
+    visit = nda['VISIT'].replace('_','')
+    bidstype = 'anat'
+    scantype = 'T1w'
+
+    imageName = "sub-%s/ses-%s/%s/sub-%s_ses-%s_%s.nii" % ( subj, visit, bidstype,
+                                                            subj, visit, scantype )
+    print('imageName:', imageName)
+
+    msg = "Writing %s ..." % outtarname
+    print(   msg)
+#    log.info(msg)
+
+    tarout = tarfile.open( outtarname, 'w:gz' )
+
+    tarout.add( fname_out_full, arcname=imageName )
+
+    tarout.add( 'dataset_description.json', arcname='dataset_description.json' )
+
+    tarout.close()
+    print('--- tarfile writen ---')
+
+    return True
 # ========================================================================================================================================================
 
 
@@ -92,13 +169,13 @@ if __name__ == "__main__":
     # handler.setFormatter(logging.Formatter('%(levelname)s:%(asctime)s: %(message)s'))
     # log.addHandler(handler)
 
+    # --------------------------------------- Parse variables from command line -------------------------------------
     db_name = ''
     qc_name = ''
     FsTk_fname = ''
     fname = ''
     outdir = ''
 
-    # --------------------------- Parse variables from command line ---------------------------
     if len(sys.argv) < 2:
         show_program_description()
         sys.exit()
@@ -126,16 +203,15 @@ if __name__ == "__main__":
 
     outdir = os.path.abspath(outdir)
 
-
     print('share.py: db_name =', db_name)
     print('share.py: qc_name =', qc_name)
     print('share.py: FsTk_fname =', FsTk_fname)
     print('share.py: fname =', fname)
     print('share.py: outdir =', outdir)
-    # ---------------------------------------------------------------------------------------------------------------------
+    # ---------------------------------------------------------------------------------------------------------------
 
 
-    # --------------------------- Check existence of files and directories ---------------------------
+    # ---------------------------------- Check existence of files and directories -----------------------------------
     # Get NDA series ID
     nda_id = ''
     rs = subprocess.run( ['./orac_NDAR_db.py', 'GetID', fname], stdout=subprocess.PIPE, stderr=subprocess.PIPE )
@@ -156,95 +232,32 @@ if __name__ == "__main__":
             print("Error: could not create output directory %s" % outdir)
             log.error("Error: could not create output directory %s" % outdir)
             sys.exit(0)
-    # ---------------------------------------------------------------------------------------------------------------------
+    # ---------------------------------------------------------------------------------------------------------------
 
 
-    # ----------------------------------------------- Generate output file ------------------------------------------------
+    # ----------------------------------------------- Generate image file -------------------------------------------
     # Set output file name
-    ptrn        = 'ABCD-'
+    type0 = 'ABCD-'
     minprc_type = 'ABCD-MPROC-'
+    
+    res_ok, fname_bas, fname_out_full  =  NIfTI_file_generate( fname, type0, minprc_type )
 
-    ss = fname.split( ptrn )
-    if len(ss) != 2:
-        print('Error: ----')
-        exit()
-    fname_out = ss[0] + minprc_type + ss[1]
-
-
-    # Set output file-name extension
-    fname_bas = ''
-    fxpos = fname_out.rfind('.')
-    if fxpos > 0:
-        if fxpos > (len(fname_out) - 5):   # The rightmost '.' is near the end of filename, and thus consistent with extension
-            fname_bas = fname_out[0:fxpos]
-        else:
-            fname_bas = fname_out
-    else:
-        if fxpos < 0:
-            fname_bas = fname_out
-        else:
-            print('Error: invalid output file name')
-            exit()
-    if len(fname_bas) > 0:
-        fname_out = fname_bas + '.nii'
-    fname_out_full = outdir + '/' + fname_out
+    if not res_ok:
+        sys.exit()
+    # ---------------------------------------------------------------------------------------------------------------
 
 
-    print('Generating nifti file in BIDS directory:', fname_out_full, '...')
-    cmnd = '/usr/pubsw/packages/freesurfer/RH4-x86_64-R530/bin/mri_convert'
-    rs = subprocess.run( [cmnd, '-i', FsTk_fname, '-o', fname_out_full], stdout=subprocess.PIPE, stderr=subprocess.PIPE )
-    rs_ok  = (rs.returncode == 0)
-    rs_msg = rs.stdout.decode("utf-8")
-    if not rs_ok:
-        print('Error: unable to convert file', fname_out_full )
-        sys.exit(0)
-
-    print('done')
-    # ---------------------------------------------------------------------------------------------------------------------
-
-
-    # ------------------------------------------------ Generate BIDS file -------------------------------------------------
-    # BIDS format information:
-    # https://images.nature.com/original/nature-assets/sdata/2016/sdata201644/extref/sdata201644-s1.pdf
-
-    outtarname = ''.join([ os.path.abspath(outdir), os.path.sep, fname_bas, '.tgz' ])
-
-    # Check if file already exists. If it does, exit; if not, continue
-
+    # ------------------------------------------------ Generate BIDS file -------------------------------------------
     nda = NDA_db_metadata( db_name, nda_id )
-
-    subj  = nda['SUBJECTKEY'].replace('_','')
-    visit = nda['VISIT'].replace('_','')
-    bidstype = 'anat'
-    scantype = 'T1w'
-
-    # imageName = "sub-%s/ses-%s/%s/run-%s/%s.nii" % ( nda['SUBJECTKEY'].replace('_',''), nda['VISIT'], bidstype, run, fname_bas )
-    imageName = "sub-%s/ses-%s/%s/sub-%s_ses-%s_%s.nii" % ( subj, visit, bidstype,
-                                                            subj, visit, scantype )
-    print('imageName:', imageName)
-
-    msg = "Writing %s ..." % outtarname
-    print(   msg)
-#    log.info(msg)
-
-    tarout = tarfile.open( outtarname, 'w:gz' )
-
-    tarout.add( fname_out_full, arcname=imageName )
-
-    tarout.add( 'dataset_description.json', arcname='dataset_description.json' )
-
-    tarout.close()
-    print('--- tarfile writen ---')
+    
+    res_ok = BIDS_file_generate( outdir, fname_bas, fname_out_full, nda )
+    
+    if not res_ok:
+        sys.exit()
+    # ---------------------------------------------------------------------------------------------------------------
 
 
-    # tinfo = tarfile.TarInfo( name=imageName )
-    # # tarout.add( fname_out_full )
-    # tarout.addfile( tinfo, fname_out_full )
-    # ---------------------------------------------------------------------------------------------------------------------
-
-
-
-    # ----------------------------- Record file upload metadata in local and NDA databases --------------------------------
+    # ----------------------------- Record file upload metadata in local and NDA databases --------------------------
 
     # Assembly NDA required information from our local spreadsheets, file system, and image files' metadata
     # We'll get additional info from fast-track NDA database, and NDA data dictionary
@@ -294,59 +307,3 @@ if __name__ == "__main__":
     # ---------------------------------------------------------------------------------------------------------------------
 
 # ========================================================================================================================================================
-
-
-
-
-
-# --------------------------------------------------------------------------------------------------------------------------------------------------------
-
-    # print('QC spreadsheet contains NDA17 shared subjects only. Columns:')
-    # print('id_redcap, redcap_event_name, site,qc_outcome, qc_fail_quest_reason')
-
-    # # Create BIDS container with processed images and metadata
-    # bids_dir = 'bids_dir'
-    # mkdir(            bids_dir )
-    # mkdir( path.join( bids_dir, 'event' ) )
-    # mkdir( path.join( bids_dir, 'event', 'anat') )
-
-    # # Store image file in BIDS container
-    # bids_dir_file = path.join( bids_dir, 'event', 'anat', fname_out )
-
-
-
-
-
-
-
-#     # ------------------------------------------------ Generate BIDS file -------------------------------------------------
-
-#     outtarname = ''.join([ os.path.abspath(outdir), os.path.sep, fname_bas, '.tgz' ])
-
-#     # Check if file already exists. If it does, exit; if not, continue
-    
-#     msg = "Writing %s ..." % outtarname
-#     print(   msg)
-# #    log.info(msg)
-
-#     tarout = tarfile.open( outtarname, 'w:gz' )
-
-#     nda = NDA_db_metadata( db_name, nda_id )
-#     bidstype = 'anat'   # Is this correct?
-#     run = 1              # Where do I get this number?
-
-#     # imageName = "sub-%s/ses-%s/%s/run-%s/%s" % ( nda['SUBJECTKEY'], nda['VISIT'], bidstype, run, fname_bas )
-#     imageName = "sub-%s/ses-%s/%s/run-%s/%s.nii" % ( nda['SUBJECTKEY'].replace('_',''), nda['VISIT'], bidstype, run, fname_bas )
-
-#     tarout.add( fname_out_full, arcname=imageName )
-
-#     tarout.add( 'dataset_description.json', arcname='dataset_description.json' )
-
-#     tarout.close()
-#     print('--- tarfile writen ---')
-
-
-#     # tinfo = tarfile.TarInfo( name=imageName )
-#     # # tarout.add( fname_out_full )
-#     # tarout.addfile( tinfo, fname_out_full )
-#     # ---------------------------------------------------------------------------------------------------------------------
