@@ -138,7 +138,7 @@ while read -r line; do
     # "session_det",  <- explain the type of preprocessing
     # "image_history"
 
-    cmd="${dir}/share_min_proc_data.py --miNDAR ${db} --qc ${qc} --share ${T1} --reference $file_name --outdir ./temp"
+    cmd="${dir}/share_min_proc_data.py --miNDAR ${db} --qc ${qc} --share ${T1} --reference $file_name --outdir ./MinPrcsData"
     echo $cmd
     echo $cmd >> ${dir}/log.log
     exec $cmd 2>&1 | tee -a ${dir}/log.log

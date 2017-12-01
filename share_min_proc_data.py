@@ -4,7 +4,7 @@ Collect processed imaging data, and share it on NDA
 
 This script and associated resources are in: https://github...
 
-Written by Hauke Bartsch & Octavio Ruiz, 2017nov16-
+Written by Hauke Bartsch & Octavio Ruiz, 2017nov16-dec01
 """
 
 # import sys, os, time, atexit, stat, tempfile, copy, tarfile, datetime, io, getopt
@@ -21,9 +21,10 @@ Written by Hauke Bartsch & Octavio Ruiz, 2017nov16-
 # import pandas as pd
 # import hashlib
 
-import sys, getopt, os, tarfile
+import sys, getopt, os, tarfile, datetime
 import logging, logging.handlers
-import subprocess
+import subprocess, json
+import sqlite3
 
 import warnings
 warnings.simplefilter(action='ignore', category=UserWarning)
@@ -36,7 +37,9 @@ import csv
 
 # ========================================================================================================================================================
 
+# ---------------------------------------------------------------------------------------------------------------------------------
 def show_program_description( nothing=0 ):
+
     print('Usage:')
     print('  ./share_min_proc_data.py  --miNDAR DB  --qc QC  --share FsTkfname  --reference FileName  --outdir OutDir')
     print('where')
@@ -54,122 +57,10 @@ def show_program_description( nothing=0 ):
           ' --outdir ./temp' )
     print()
     return 0
+# ---------------------------------------------------------------------------------------------------------------------------------
 
-
-def NDA_db_metadata( db_name, nda_id ):
-    # Get subject's information from fast-track shared data NDA database
-    record = {}
-
-    dat = pd.read_csv( db_name )
-    pd_record  =  dat[ dat['IMAGE03_ID'] == int(nda_id) ]
-    pd_record.index = [0]
-
-    record = {"SUBJECTKEY":      pd_record.get_value(0,'SUBJECTKEY'),
-              "SRC_SUBJECT_ID":  pd_record.get_value(0,'SRC_SUBJECT_ID'),
-              "DATASET_ID":      pd_record.get_value(0,'DATASET_ID'),
-              "INTERVIEW_DATE":  pd_record.get_value(0,'INTERVIEW_DATE'),
-              "INTERVIEW_AGE":   pd_record.get_value(0,'INTERVIEW_AGE'),
-              "GENDER":          pd_record.get_value(0,'GENDER'),
-              "IMAGE_FILE":      pd_record.get_value(0,'IMAGE_FILE'),
-              "VISIT":           pd_record.get_value(0,'VISIT') }
-
-    return record
-
-
-
-def NIfTI_file_generate( fname, type0, type_new ):
-    fname_bas = ''
-    fname_out_full = ''
-
-    # Set output file name
-    ss = fname.split( type0 )
-    if len(ss) != 2:
-        print('Error: ----')
-        return False, fname_bas, fname_out_full
-
-    fname_out = ss[0] + type_new + ss[1]
-
-    # Set output file-name extension
-    fxpos = fname_out.rfind('.')
-    if fxpos > 0:
-        if fxpos > (len(fname_out) - 5):   # The rightmost '.' is near the end of filename, and thus consistent with extension
-            fname_bas = fname_out[0:fxpos]
-        else:
-            fname_bas = fname_out
-    else:
-        if fxpos < 0:
-            fname_bas = fname_out
-        else:
-            print('Error: invalid output file name')
-            return False, fname_bas, fname_out_full
-
-    if len(fname_bas) > 0:
-        fname_out = fname_bas + '.nii'
-    fname_out_full = outdir + '/' + fname_out
-
-    print('Generating nifti file:', fname_out_full, '...')
-    cmnd = '/usr/pubsw/packages/freesurfer/RH4-x86_64-R530/bin/mri_convert'
-    rs = subprocess.run( [cmnd, '-i', FsTk_fname, '-o', fname_out_full], stdout=subprocess.PIPE, stderr=subprocess.PIPE )
-    rs_ok  = (rs.returncode == 0)
-    rs_msg = rs.stdout.decode("utf-8")
-    if not rs_ok:
-        print('Error: unable to convert file', fname_out_full )
-        return False, fname_bas, fname_out_full
-
-    print('done')
-    return True, fname_bas, fname_out_full
-
-
-
-def BIDS_file_generate( outdir, fname_bas, fname_out_full, nda ):
-    # The BIDS format specification is described in
-    # https://images.nature.com/original/nature-assets/sdata/2016/sdata201644/extref/sdata201644-s1.pdf
-
-    outtarname = ''.join([ os.path.abspath(outdir), os.path.sep, fname_bas, '.tgz' ])
-
-    # Check if file already exists. If it does, return False;  if not, continue:
-
-    subj  = nda['SUBJECTKEY'].replace('_','')
-    visit = nda['VISIT'].replace('_','')
-    bidstype = 'anat'
-    scantype = 'T1w'
-
-    imageName = "sub-%s/ses-%s/%s/sub-%s_ses-%s_%s.nii" % ( subj, visit, bidstype,
-                                                            subj, visit, scantype )
-    print('imageName:', imageName)
-
-    msg = "Writing %s ..." % outtarname
-    print(   msg)
-#    log.info(msg)
-
-    tarout = tarfile.open( outtarname, 'w:gz' )
-
-    tarout.add( fname_out_full, arcname=imageName )
-
-    tarout.add( 'dataset_description.json', arcname='dataset_description.json' )
-
-    tarout.close()
-    print('--- tarfile writen ---')
-
-    return True
-# ========================================================================================================================================================
-
-
-
-
-# ========================================================================================================================================================
-
-if __name__ == "__main__":
-
-    # lfn = ''.join([ os.path.dirname(os.path.abspath(__file__)), os.path.sep, '/share_min_proc_data.log' ])
-    # # logging.basicConfig(filename=lfn,format='%(levelname)s:%(asctime)s: %(message)s',level=logging.DEBUG)
-    # log = logging.getLogger('MyLogger')
-    # log.setLevel(logging.DEBUG)
-    # handler = logging.handlers.RotatingFileHandler( lfn, maxBytes=1e+7, backupCount=5 )
-    # handler.setFormatter(logging.Formatter('%(levelname)s:%(asctime)s: %(message)s'))
-    # log.addHandler(handler)
-
-    # --------------------------------------- Parse variables from command line -------------------------------------
+# ---------------------------------------------------------------------------------------------------------------------------------
+def command_line_get_variables():
     db_name = ''
     qc_name = ''
     FsTk_fname = ''
@@ -200,30 +91,304 @@ if __name__ == "__main__":
             fname = arg
         elif opt in ("-o", "--outdir"):
             outdir = arg
-
     outdir = os.path.abspath(outdir)
 
-    print('share.py: db_name =', db_name)
-    print('share.py: qc_name =', qc_name)
-    print('share.py: FsTk_fname =', FsTk_fname)
-    print('share.py: fname =', fname)
-    print('share.py: outdir =', outdir)
+    return db_name, qc_name, FsTk_fname, fname, outdir
+# ---------------------------------------------------------------------------------------------------------------------------------
+
+# ---------------------------------------------------------------------------------------------------------------------------------
+def NDA_db_metadata( db_name, nda_id ):
+    # Get subject's information from fast-track shared data NDA database
+    record = {}
+    dat = pd.read_csv( db_name )
+    pd_record  =  dat[ dat['IMAGE03_ID'] == int(nda_id) ]
+    pd_record.index = [0]
+    record = {"SUBJECTKEY":      pd_record.get_value(0,'SUBJECTKEY'),
+              "SRC_SUBJECT_ID":  pd_record.get_value(0,'SRC_SUBJECT_ID'),
+              "DATASET_ID":      pd_record.get_value(0,'DATASET_ID'),
+              "INTERVIEW_DATE":  pd_record.get_value(0,'INTERVIEW_DATE'),
+              "INTERVIEW_AGE":   pd_record.get_value(0,'INTERVIEW_AGE'),
+              "GENDER":          pd_record.get_value(0,'GENDER'),
+              "IMAGE_FILE":      pd_record.get_value(0,'IMAGE_FILE'),
+              "VISIT":           pd_record.get_value(0,'VISIT') }
+    return record
+# ---------------------------------------------------------------------------------------------------------------------------------
+
+# ---------------------------------------------------------------------------------------------------------------------------------
+def NIfTI_file_create( fname, type0, type_new ):
+    fname_bas = ''
+    fname_image = ''
+
+    # Set output file name
+    ss = fname.split( type0 )
+    if len(ss) != 2:
+        print('Error: ----')
+        sys.exit(0)
+
+    fname_image = ss[0] + type_new + ss[1]
+
+    # Set output file-name extension
+    fxpos = fname_image.rfind('.')
+    if fxpos > 0:
+        if fxpos > (len(fname_image) - 5):   # The rightmost '.' is near the end of filename, and thus consistent with extension
+            fname_bas = fname_image[0:fxpos]
+        else:
+            fname_bas = fname_image
+    else:
+        if fxpos < 0:
+            fname_bas = fname_image
+        else:
+            print('Error: invalid output file name')
+            sys.exit(0)
+
+    if len(fname_bas) > 0:
+        fname_image = fname_bas + '.nii'
+
+    print('Generating NIfTI file:', fname_image, '...')
+
+    # Convert image file into a NIfTI file, using dcm2nii
+    cmnd = '/usr/pubsw/packages/freesurfer/RH4-x86_64-R530/bin/mri_convert'
+
+    rs = subprocess.run( [cmnd, '-i', FsTk_fname, '-o', fname_image], stdout=subprocess.PIPE, stderr=subprocess.PIPE )
+
+    rs_ok  = (rs.returncode == 0)
+    rs_msg = rs.stdout.decode("utf-8")
+    if not rs_ok:
+        print('Error: unable to convert file', FsTk_fname, 'to NIfTI', fname_image)
+        sys.exit(0)
+
+    return fname_bas, fname_image
+# ---------------------------------------------------------------------------------------------------------------------------------
+
+# ---------------------------------------------------------------------------------------------------------------------------------
+def BIDS_file_create( outdir, fname_bas, fname_image, nda ):
+    outtarname = ''
+    res_ok = False
+
+    # Write a tar file containing a BIDS-complying directory structure
+    outtarname = ''.join([ outdir, os.path.sep, fname_bas, '.tgz' ])
+
+    if os.path.exists(outtarname):
+        msg = "BIDS file already exists: %s" % outtarname
+        print( 'Error:', msg )
+        log.error( msg + ", stop processing." )
+        outtarname = ''
+        return False, ''
+
+    # BIDS format specification is described in
+    # https://images.nature.com/original/nature-assets/sdata/2016/sdata201644/extref/sdata201644-s1.pdf
+
+    subj  = nda['SUBJECTKEY'].replace('_','')
+    visit = nda['VISIT'].replace('_','')
+    bidstype = 'anat'
+    scantype = 'T1w'
+
+    imageName = "sub-%s/ses-%s/%s/sub-%s_ses-%s_%s.nii" % ( subj, visit, bidstype,
+                                                            subj, visit, scantype )
+
+    msg = "Adding  %s  to  %s ..." % (imageName, outtarname)
+    print( msg )
+    log.info( msg )
+
+    tarout = tarfile.open( outtarname, 'w:gz' )
+    tarout.add( fname_image, arcname=imageName )
+    tarout.add( 'dataset_description.json', arcname='dataset_description.json' )
+    tarout.close()
+
+    return True, outtarname
+# ---------------------------------------------------------------------------------------------------------------------------------
+
+# ---------------------------------------------------------------------------------------------------------------------------------
+def miNDA_record_upload( metadata ):
+    miNDA_ok = False
+    miNDA_msg = ''
+
+    try:
+        with open('login_credentials.json','r') as f:
+            try:
+                login_credentials = json.load(f)
+            except ValueError:
+                print("Error: could not read login_credentials.json in the current directory or syntax error")
+                log.error("Error: could not read login_credentials.json in the current directory or syntax error")
+                sys.exit(0)
+
+    except IOError:
+        print("Error: unable to read login_credentials.json file in the current directory")
+        log.error("Error: could not read login_credentials.json in the current directory")
+        sys.exit(0)
+
+    username = login_credentials['miNDAR']['username']
+    password = login_credentials['miNDAR']['password']
+
+    # NDA requires a number in the first image_resolution field
+    metadata['image_resolution1'] = '0'
+
+    # Assembly package from metadata
+    package = {
+        "schemaName": "abcd_upload_107927",
+        "dataStructureRows": [ {
+                "shortName":  "image03",
+                "dataElement": []
+        } ]
+    }
+    for i,v in metadata.items():
+        t = v
+        if isinstance(t, list):
+            t = json.dumps(t)
+        package['dataStructureRows'][0]['dataElement'].append( { "name": i, "value": t } )
+
+
+    # --- TEST : ---
+    # 
+    print('\npackage to upload to miNDA:')
+    print( package )
+    # 
+    # 
+    # # Upload metadata package
+    # res = requests.post( "https://ndar.nih.gov/api/mindar/import",
+    #                     auth=requests.auth.HTTPBasicAuth(username, password),
+    #                     headers={'content-type':'application/json'},
+    #                     data = json.dumps(package) )
+    # miNDA_ok  = res.ok
+    # miNDA_msg = res.text
+    # 
+    
+    miNDA_ok  = True
+    miNDA_msg = '... would have been uploaded'
+    # 
+    # --- : TEST ---
+
+
+    return miNDA_ok, miNDA_msg
+# ---------------------------------------------------------------------------------------------------------------------------------
+
+# ---------------------------------------------------------------------------------------------------------------------------------
+def AWS_file_upload( filename, AWS_bucket ):
+    s3_ok  = False
+    s3_msg = ''
+
+    # AWS credentials must have been entered in the computer running this process
+
+    # --- TEST : ---
+    # 
+    # rs  =  subprocess.run( ['/home/oruiz/.local/bin/aws', 's3', 'cp', filename, AWS_bucket], stderr=subprocess.PIPE )
+    # s3_ok  = (rs.returncode == 0)
+    # s3_msg = rs.stderr.decode("utf-8")
+    # 
+    print('Here I would upload ', filename, ' to ', AWS_bucket )
+    rs  =  subprocess.run( ['ls', filename], stderr=subprocess.PIPE )
+    s3_ok  = (rs.returncode == 0)
+    s3_msg = rs.stderr.decode("utf-8")
+    # 
+    # --- : TEST ---
+
+
+    return s3_ok, s3_msg
+# ---------------------------------------------------------------------------------------------------------------------------------
+
+
+# ---------------------------------------------------------------------------------------------------------------------------------
+# - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
+
+def createMetaDataDB( metadatadir, table_name, metadata ):
+    sqlite_file = ''.join([metadatadir, '/', 'metadata.sqlite'])    # name of the sqlite database file
+
+    # Connecting to the database file
+    conn = sqlite3.connect(sqlite_file)
+    c = conn.cursor()
+
+    # Creating a new SQLite table
+    c.execute('CREATE TABLE {tn} (id INTEGER PRIMARY KEY)'.format(tn=table_name))
+    for key in metadata:
+        c.execute("ALTER TABLE {tn} ADD COLUMN '{cn}' {ct}".format(tn=table_name,cn=key,ct="TEXT"))
+
+    # Committing changes and closing the connection to the database file
+    conn.commit()
+    conn.close()
+# - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
+
+# - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
+
+def addMetaData( metadatadir, table_name, metadata ):
+    """       
+      Store NDA-type information into local sqlite3 database
+    """
+    sqlite_file = ''.join([metadatadir, '/', 'metadata.sqlite'])    # name of the sqlite database file
+
+    # if db does not exist already, create it
+    if not os.path.isfile(sqlite_file):
+            createMetaDataDB(metadatadir, table_name, metadata)
+            if not os.path.isfile(sqlite_file):
+                    print("Error: Could not create a database file at %s" % sqlite_file)
+                    return
+
+    # Connecting to the database file
+    conn = 0
+    try:
+        conn = sqlite3.connect(sqlite_file)
+    except sqlite3.Error:
+        print("Warning: Could not connect to database file %s... wait and try again." % sqlite_file)
+        time.sleep(1)
+        try:
+                conn = sqlite3.connect(sqlite_file)
+        except sqlite3.Error:
+                print("Error: Could not connect to database file %s" % sqlite_file)
+                return
+        pass
+
+    c = conn.cursor()
+
+    # A) Inserts an ID with a specific value in a second column
+    keys = []
+    values = []
+    for key in metadata:
+        keys.append(key)
+        if not isinstance(metadata[key], str):
+            values.append(''.join(['"', str(metadata[key]), '"']))
+        else:
+            values.append(''.join(['"', metadata[key], '"']))
+
+    c.execute("INSERT INTO {tn} ({cn}) VALUES ({val})".format(tn=table_name, cn=(','.join(keys)), val=(','.join(values))))
+
+    conn.commit()
+    conn.close()
+# - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
+# ---------------------------------------------------------------------------------------------------------------------------------
+
+# ========================================================================================================================================================
+
+
+
+
+# ========================================================================================================================================================
+
+if __name__ == "__main__":
+
+    # ---------------------------------------------- Initialize log -------------------------------------------------
+    lfn = ''.join([ os.path.dirname(os.path.abspath(__file__)), os.path.sep, '/share_min_proc_data.log' ])
+    log = logging.getLogger('MyLogger')
+    log.setLevel(logging.DEBUG)
+    handler = logging.handlers.RotatingFileHandler( lfn, maxBytes=1e+7, backupCount=5 )
+    handler.setFormatter(logging.Formatter('%(levelname)s:%(asctime)s: %(message)s'))
+    log.addHandler(handler)
+    # ---------------------------------------------------------------------------------------------------------------
+
+
+    # --------------------------------------- Get variables from command line ---------------------------------------
+    db_name, qc_name, FsTk_fname, fname, outdir  =  command_line_get_variables()
+    metadatadir = outdir
+
+    print('  share_min_proc_data.py:')
+    print('db_name :   ', db_name)
+    print('qc_name :   ', qc_name)
+    print('FsTk_fname: ', FsTk_fname)
+    print('fname :     ', fname)
+    print('outdir :    ', outdir)
+    print('metadatadir:', metadatadir)
     # ---------------------------------------------------------------------------------------------------------------
 
 
     # ---------------------------------- Check existence of files and directories -----------------------------------
-    # Get NDA series ID
-    nda_id = ''
-    rs = subprocess.run( ['./orac_NDAR_db.py', 'GetID', fname], stdout=subprocess.PIPE, stderr=subprocess.PIPE )
-    rs_ok  = (rs.returncode == 0)
-    rs_msg = rs.stdout.decode("utf-8")
-    if not rs_ok:
-        print('+ Unable to access local NDA data base +')
-        sys.exit(0)
-    # The NDAR databae has some repeated series, with different IDs' get the last one
-    # For now I will take the first one
-    nda_id = rs_msg.split('\n', 1)[-1].strip()
-    print('nda_id =', nda_id )
 
     if not os.path.exists(outdir):
         print("Warning: output directory %s does not exist, try to create..." % outdir)
@@ -235,48 +400,97 @@ if __name__ == "__main__":
     # ---------------------------------------------------------------------------------------------------------------
 
 
-    # ----------------------------------------------- Generate image file -------------------------------------------
-    # Set output file name
-    type0 = 'ABCD-'
-    minprc_type = 'ABCD-MPROC-'
-    
-    res_ok, fname_bas, fname_out_full  =  NIfTI_file_generate( fname, type0, minprc_type )
+    # -------------------- We need to link previously fast-track upload data with this upload  ----------------------
+    # -------------------- Get NDA key to link both data uploads ----------------------------------------------------
+    # Get NDA series ID
+    nda_id = ''
+    rs = subprocess.run( ['./orac_NDAR_db.py', 'GetID', fname], stdout=subprocess.PIPE, stderr=subprocess.PIPE )
+    rs_ok  = (rs.returncode == 0)
+    rs_msg = rs.stdout.decode("utf-8")
+    if not rs_ok:
+        print('+ Unable to access local NDA data base +')
+        sys.exit(0)
 
-    if not res_ok:
-        sys.exit()
+    # The NDAR database has some repeated series, with different IDs' get the last one
+    # For now I will take the first one
+    nda_id = rs_msg.split('\n', 1)[-1].strip()
+    print('nda_id =', nda_id, '\n' )
+
+    nda = NDA_db_metadata( db_name, nda_id )
     # ---------------------------------------------------------------------------------------------------------------
 
 
-    # ------------------------------------------------ Generate BIDS file -------------------------------------------
-    nda = NDA_db_metadata( db_name, nda_id )
+    # ---------------------------------- Create temporary NIfTI image file ------------------------------------------
+    type0 = 'ABCD-'
+    minprc_type = 'ABCD-MPROC-'
     
-    res_ok = BIDS_file_generate( outdir, fname_bas, fname_out_full, nda )
-    
+    fname_bas, fname_image  =  NIfTI_file_create( fname, type0, minprc_type )
+    # ---------------------------------------------------------------------------------------------------------------
+
+
+    # ---------------------------------------- Assembly BIDS object -------------------------------------------------
+
+    # Incorporate NIfTI file to BIDS object
+    res_ok, outtarname  =  BIDS_file_create( outdir, fname_bas, fname_image, nda )
+
+    # Remove temporary NIfTI file
+    print('Removing NIfTI file:', fname_image, '...')
+    try:
+        os.remove( fname_image )
+    except Exception as e:
+        print('Error: unable to remove temporary file', fname_image, e)
+
     if not res_ok:
-        sys.exit()
+        # BIDS file already exists
+        sys.exit(0)
     # ---------------------------------------------------------------------------------------------------------------
 
 
     # ----------------------------- Record file upload metadata in local and NDA databases --------------------------
 
-    # Assembly NDA required information from our local spreadsheets, file system, and image files' metadata
-    # We'll get additional info from fast-track NDA database, and NDA data dictionary
+    #      Assembly meta-data record to be saved to NDA and our local database
+    #      Use information from our local spreadsheets, file system, and image files' metadata;
+    #      additional info from fast-track NDA database, and NDA data dictionary
 
-    # Calculate experiment ID fom image file metadata ----orsomethingelse?---- and NDA Data Dictionary
-    exp_id = '-1234'   # This number will be provided by NDA, after we create new experiment types
+	# - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
+ 	# Calculate metadata for current image series and processing stage
 
-    # Calculate experiment information from image file
-    # Value must be one of these:
-    # MR diffusion; fMRI; MR structural (MPRAGE); MR structural (T1); MR structural (PD); MR structural (FSPGR); MR structural (FISP); MR structural (T2); PET; ASL; microscopy; MR structural (PD, T2); MR structural (B0 map); MR structural (B1 map); single-shell DTI; multi-shell DTI; Field Map; X-Ray; static magnetic field B0
-    # For T1:
+    # NDA: Data Dictionary: Title:      Processed MRI Data
+    # NDA: Data Dictionary: Short Name: fmriresults01
+    local_db_table = 'fmriresults01'
+
+    #                         Convert study date to NDA format
+    # 
+    # Date read from NDA is in format '2016-10-12 03:00:00'
+    # Record to upload requires format "04/06/2017 00:00:00", so convert
+    datetime_orig = nda['INTERVIEW_DATE']
+    dt_obj = datetime.datetime.strptime( datetime_orig, '%Y-%m-%d %H:%M:%S' )
+    datetime_reformated = dt_obj.strftime( '%m/%d/%Y %H:%M:%S' )
+
+    # Experiment ID is empty for structural imaging. For fMRI, a number will be provided by the NDA dictionary after we create new experiment types
+    exp_id = ''
+
+    # Type of scan; value must be one of these:
+    #   MR diffusion; fMRI; MR structural (MPRAGE); MR structural (T1); MR structural (PD); MR structural (FSPGR); MR structural (FISP); MR structural (T2);
+    #   PET; ASL; microscopy; MR structural (PD, T2); MR structural (B0 map); MR structural (B1 map); single-shell DTI; multi-shell DTI; Field Map;
+    #   X-Ray; static magnetic field B0
+    # There is not a value exclusively for minimally processed structural T1, we will use
     exp_scan = 'MR structural (T1)'
 
-    # Assembly meta-data record to be savev to NDA and our local database
-    # (according to specifications in fmriresults01_template.csv)
+    # Description of project, processing stage (none = fast-track,  minimally-processed,  processed, ...)
+    # and summarized description of processing
+    session_det   = 'ABCD-MPROC-T1'
+    image_history = 'gradient unwarp, B1 inhomogeneity correction, resampled to 1mm^3 isotropic in LIA rigid body registration to non-MNI atlas'
+    
+    AWS_bucket = 's3://abcd-mproc/'
+	# - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
+
+	# - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
+    # Assembly NDA-complying meta-data record (according to specifications in fmriresults01_definitions-2.csv)
     record = {"subjectkey":        nda['SUBJECTKEY'],
               "src_subject_id":    nda['SRC_SUBJECT_ID'],
               "origin_dataset_id": nda['DATASET_ID'],
-              "interview_date":    nda['INTERVIEW_DATE'],
+              "interview_date":    datetime_reformated,
               "interview_age":     nda['INTERVIEW_AGE'],
               "gender":            nda['GENDER'],
               "experiment_id": exp_id,
@@ -293,17 +507,60 @@ if __name__ == "__main__":
               "pipeline_version": '245',
               "qc_fail_quest_reason": '',
               "qc_outcome":           'pass',
-              "derived_files": 's3://...',   # a single s3 path to aTGZ file that contains the uploaded data in BIDS format
+              "derived_files": AWS_bucket + fname_bas,
               "scan_type":     exp_scan,
               "img03_id2":     '',
               "file_source2":  '',
-              "session_det":   'gradient unwarp, B1 inhomogeneity correction, resampled to 1mm^3 isotropic in LIA rigid body registration to non-MNI atlas',
-              "image_history": '' }
+              "session_det":   session_det,
+              "image_history": image_history }
+	# - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
 
+	# - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
+    # Report NDA record
     with open('newMinPrcsDat_NDA_record.csv', 'w') as f:
         w = csv.DictWriter(f, record.keys())
         w.writeheader()
         w.writerow(record)
-    # ---------------------------------------------------------------------------------------------------------------------
+	# - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
+    # ---------------------------------------------------------------------------------------------------------------
 
+
+    # ------------------------------ Upload record to miNDA and BIDS strucutre to AWS -------------------------------
+
+    miNDA_ok, miNDA_msg  =  miNDA_record_upload( record )
+
+    print('\nmiNDA_ok =', miNDA_ok)
+    print(  'miNDA_msg:', miNDA_msg, '\n')
+
+    if miNDA_ok:
+        s3_ok, s3_msg  =  AWS_file_upload( outtarname, AWS_bucket )
+    else:
+        s3_ok  = ''
+        s3_msg = 'AWS-s3 not attempted, because miNDA upload failed'
+
+    print('s3_ok =', s3_ok)
+    print('s3_msg:', s3_msg)
+    # ---------------------------------------------------------------------------------------------------------------
+
+
+    # ----------------------------------- Upload record to local SQLite database ------------------------------------
+    local_record = record
+
+    local_record['miNDA_ok']  = miNDA_ok
+    local_record['miNDA_msg'] = miNDA_msg
+    local_record['miNDA_msg'] = local_record['miNDA_msg'].replace('\"','')
+    local_record['miNDA_msg'] = local_record['miNDA_msg'].replace('\'','')
+
+    local_record['s3_ok']  = s3_ok
+    local_record['s3_msg'] = s3_msg
+    local_record['s3_msg'] = local_record['s3_msg'].replace('\"','')
+    local_record['s3_msg'] = local_record['s3_msg'].replace('\'','')
+
+    addMetaData( metadatadir, local_db_table, local_record )
+    # ---------------------------------------------------------------------------------------------------------------
+
+    msg = "share_min_proc_data: End"
+    print( msg )
+    log.info( msg )
+    sys.exit(0)
 # ========================================================================================================================================================
