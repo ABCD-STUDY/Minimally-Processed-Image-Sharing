@@ -4,7 +4,7 @@ Collect processed imaging data, and share it on NDA
 
 This script and associated resources are in: https://github...
 
-Written by Hauke Bartsch & Octavio Ruiz, 2017nov16-dec01
+Written by Hauke Bartsch & Octavio Ruiz, 2017nov16-dec04
 """
 
 # import sys, os, time, atexit, stat, tempfile, copy, tarfile, datetime, io, getopt
@@ -31,6 +31,8 @@ warnings.simplefilter(action='ignore', category=UserWarning)
 warnings.simplefilter(action='ignore', category=FutureWarning)
 import pandas as pd
 pd.set_option('display.width', 512)
+
+import requests
 
 import csv
 
@@ -103,14 +105,14 @@ def NDA_db_metadata( db_name, nda_id ):
     dat = pd.read_csv( db_name )
     pd_record  =  dat[ dat['IMAGE03_ID'] == int(nda_id) ]
     pd_record.index = [0]
-    record = {"SUBJECTKEY":      pd_record.get_value(0,'SUBJECTKEY'),
-              "SRC_SUBJECT_ID":  pd_record.get_value(0,'SRC_SUBJECT_ID'),
-              "DATASET_ID":      pd_record.get_value(0,'DATASET_ID'),
-              "INTERVIEW_DATE":  pd_record.get_value(0,'INTERVIEW_DATE'),
-              "INTERVIEW_AGE":   pd_record.get_value(0,'INTERVIEW_AGE'),
-              "GENDER":          pd_record.get_value(0,'GENDER'),
-              "IMAGE_FILE":      pd_record.get_value(0,'IMAGE_FILE'),
-              "VISIT":           pd_record.get_value(0,'VISIT') }
+    record = {"SUBJECTKEY":      str( pd_record.get_value(0,'SUBJECTKEY')),
+              "SRC_SUBJECT_ID":  str( pd_record.get_value(0,'SRC_SUBJECT_ID')),
+              "DATASET_ID":      str( pd_record.get_value(0,'DATASET_ID')),
+              "INTERVIEW_DATE":  str( pd_record.get_value(0,'INTERVIEW_DATE')),
+              "INTERVIEW_AGE":   str( pd_record.get_value(0,'INTERVIEW_AGE')),
+              "GENDER":          str( pd_record.get_value(0,'GENDER')),
+              "IMAGE_FILE":      str( pd_record.get_value(0,'IMAGE_FILE')),
+              "VISIT":           str( pd_record.get_value(0,'VISIT')) }
     return record
 # ---------------------------------------------------------------------------------------------------------------------------------
 
@@ -220,14 +222,11 @@ def miNDA_record_upload( metadata ):
     username = login_credentials['miNDAR']['username']
     password = login_credentials['miNDAR']['password']
 
-    # NDA requires a number in the first image_resolution field
-    metadata['image_resolution1'] = '0'
-
     # Assembly package from metadata
     package = {
         "schemaName": "abcd_upload_107927",
         "dataStructureRows": [ {
-                "shortName":  "image03",
+                "shortName":  'fmriresults01',
                 "dataElement": []
         } ]
     }
@@ -238,25 +237,29 @@ def miNDA_record_upload( metadata ):
         package['dataStructureRows'][0]['dataElement'].append( { "name": i, "value": t } )
 
 
-    # --- TEST : ---
-    # 
+    # # --- TEST : ---
+    # # 
     print('\npackage to upload to miNDA:')
-    print( package )
+    #print( package )
+
+    print( json.dumps(package) )
+
+
+    # # 
     # 
-    # 
-    # # Upload metadata package
-    # res = requests.post( "https://ndar.nih.gov/api/mindar/import",
-    #                     auth=requests.auth.HTTPBasicAuth(username, password),
-    #                     headers={'content-type':'application/json'},
-    #                     data = json.dumps(package) )
-    # miNDA_ok  = res.ok
-    # miNDA_msg = res.text
-    # 
+    # Upload metadata package
+    res = requests.post( "https://ndar.nih.gov/api/mindar/import",
+                        auth=requests.auth.HTTPBasicAuth(username, password),
+                        headers={'content-type':'application/json'},
+                        data = json.dumps(package) )
+    miNDA_ok  = res.ok
+    miNDA_msg = res.text
     
-    miNDA_ok  = True
-    miNDA_msg = '... would have been uploaded'
-    # 
-    # --- : TEST ---
+    
+    # miNDA_ok  = True
+    # miNDA_msg = '... would have been uploaded'
+    # # 
+    # # --- : TEST ---
 
 
     return miNDA_ok, miNDA_msg
@@ -271,16 +274,16 @@ def AWS_file_upload( filename, AWS_bucket ):
 
     # --- TEST : ---
     # 
-    # rs  =  subprocess.run( ['/home/oruiz/.local/bin/aws', 's3', 'cp', filename, AWS_bucket], stderr=subprocess.PIPE )
-    # s3_ok  = (rs.returncode == 0)
-    # s3_msg = rs.stderr.decode("utf-8")
-    # 
-    print('Here I would upload ', filename, ' to ', AWS_bucket )
-    rs  =  subprocess.run( ['ls', filename], stderr=subprocess.PIPE )
+    rs  =  subprocess.run( ['/home/oruiz/.local/bin/aws', 's3', 'cp', filename, AWS_bucket], stderr=subprocess.PIPE )
     s3_ok  = (rs.returncode == 0)
     s3_msg = rs.stderr.decode("utf-8")
-    # 
-    # --- : TEST ---
+    # # 
+    # print('Here I would upload ', filename, ' to ', AWS_bucket )
+    # rs  =  subprocess.run( ['ls', filename], stderr=subprocess.PIPE )
+    # s3_ok  = (rs.returncode == 0)
+    # s3_msg = rs.stderr.decode("utf-8")
+    # # 
+    # # --- : TEST ---
 
 
     return s3_ok, s3_msg
@@ -465,7 +468,9 @@ if __name__ == "__main__":
     # Record to upload requires format "04/06/2017 00:00:00", so convert
     datetime_orig = nda['INTERVIEW_DATE']
     dt_obj = datetime.datetime.strptime( datetime_orig, '%Y-%m-%d %H:%M:%S' )
+    # datetime_reformated = dt_obj.strftime( '%m/%d/%Y' )
     datetime_reformated = dt_obj.strftime( '%m/%d/%Y %H:%M:%S' )
+
 
     # Experiment ID is empty for structural imaging. For fMRI, a number will be provided by the NDA dictionary after we create new experiment types
     exp_id = ''
