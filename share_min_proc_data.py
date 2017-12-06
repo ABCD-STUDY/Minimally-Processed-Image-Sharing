@@ -4,22 +4,8 @@ Collect processed imaging data, and share it on NDA
 
 This script and associated resources are in: https://github...
 
-Written by Hauke Bartsch & Octavio Ruiz, 2017nov16-dec04
+Written by Hauke Bartsch & Octavio Ruiz, 2017nov16-dec05
 """
-
-# import sys, os, time, atexit, stat, tempfile, copy, tarfile, datetime, io, getopt
-# import dicom, json, re, logging, logging.handlers, threading, pycurl, csv
-# import struct
-# from signal import SIGTERM
-# from dicom.filereader import InvalidDicomError
-# from dicom.dataelem import DataElement
-# from dicom.tag import Tag
-# from dicom.filebase import DicomBytesIO
-# from multiprocessing import Pool, TimeoutError
-# from io import StringIO
-# import sqlite3
-# import pandas as pd
-# import hashlib
 
 import sys, getopt, os, tarfile, datetime
 import logging, logging.handlers
@@ -33,6 +19,7 @@ import pandas as pd
 pd.set_option('display.width', 512)
 
 import requests
+import ast
 
 import csv
 
@@ -103,7 +90,8 @@ def NDA_db_metadata( db_name, nda_id ):
     # Get subject's information from fast-track shared data NDA database
     record = {}
     dat = pd.read_csv( db_name )
-    pd_record  =  dat[ dat['IMAGE03_ID'] == int(nda_id) ]
+    # pd_record  =  dat[ dat['IMAGE03_ID'] == int(nda_id) ]
+    pd_record  =  dat[ dat['IMAGE03_ID'] == nda_id ]
     pd_record.index = [0]
     record = {"SUBJECTKEY":      str( pd_record.get_value(0,'SUBJECTKEY')),
               "SRC_SUBJECT_ID":  str( pd_record.get_value(0,'SRC_SUBJECT_ID')),
@@ -124,7 +112,7 @@ def NIfTI_file_create( fname, type0, type_new ):
     # Set output file name
     ss = fname.split( type0 )
     if len(ss) != 2:
-        print('Error: ----')
+        print('Error: file name is too short')
         sys.exit(0)
 
     fname_image = ss[0] + type_new + ss[1]
@@ -236,17 +224,9 @@ def miNDA_record_upload( metadata ):
             t = json.dumps(t)
         package['dataStructureRows'][0]['dataElement'].append( { "name": i, "value": t } )
 
+    # print('\npackage to upload to miNDA:')
+    # print( json.dumps(package) )
 
-    # # --- TEST : ---
-    # # 
-    print('\npackage to upload to miNDA:')
-    #print( package )
-
-    print( json.dumps(package) )
-
-
-    # # 
-    # 
     # Upload metadata package
     res = requests.post( "https://ndar.nih.gov/api/mindar/import",
                         auth=requests.auth.HTTPBasicAuth(username, password),
@@ -254,13 +234,6 @@ def miNDA_record_upload( metadata ):
                         data = json.dumps(package) )
     miNDA_ok  = res.ok
     miNDA_msg = res.text
-    
-    
-    # miNDA_ok  = True
-    # miNDA_msg = '... would have been uploaded'
-    # # 
-    # # --- : TEST ---
-
 
     return miNDA_ok, miNDA_msg
 # ---------------------------------------------------------------------------------------------------------------------------------
@@ -270,21 +243,11 @@ def AWS_file_upload( filename, AWS_bucket ):
     s3_ok  = False
     s3_msg = ''
 
-    # AWS credentials must have been entered in the computer running this process
+    # AWS must be configured, in the computer running this process, with the appropriate credentials
 
-    # --- TEST : ---
-    # 
     rs  =  subprocess.run( ['/home/oruiz/.local/bin/aws', 's3', 'cp', filename, AWS_bucket], stderr=subprocess.PIPE )
     s3_ok  = (rs.returncode == 0)
     s3_msg = rs.stderr.decode("utf-8")
-    # # 
-    # print('Here I would upload ', filename, ' to ', AWS_bucket )
-    # rs  =  subprocess.run( ['ls', filename], stderr=subprocess.PIPE )
-    # s3_ok  = (rs.returncode == 0)
-    # s3_msg = rs.stderr.decode("utf-8")
-    # # 
-    # # --- : TEST ---
-
 
     return s3_ok, s3_msg
 # ---------------------------------------------------------------------------------------------------------------------------------
@@ -341,7 +304,7 @@ def addMetaData( metadatadir, table_name, metadata ):
 
     c = conn.cursor()
 
-    # A) Inserts an ID with a specific value in a second column
+    # Assembly record
     keys = []
     values = []
     for key in metadata:
@@ -381,13 +344,13 @@ if __name__ == "__main__":
     db_name, qc_name, FsTk_fname, fname, outdir  =  command_line_get_variables()
     metadatadir = outdir
 
-    print('  share_min_proc_data.py:')
-    print('db_name :   ', db_name)
-    print('qc_name :   ', qc_name)
-    print('FsTk_fname: ', FsTk_fname)
-    print('fname :     ', fname)
-    print('outdir :    ', outdir)
-    print('metadatadir:', metadatadir)
+    print('\nshare_min_proc_data.py:')
+    # print('db_name :   ', db_name)
+    # print('qc_name :   ', qc_name)
+    # print('FsTk_fname: ', FsTk_fname)
+    # print('fname :     ', fname)
+    # print('outdir :    ', outdir)
+    # print('metadatadir:', metadatadir)
     # ---------------------------------------------------------------------------------------------------------------
 
 
@@ -414,10 +377,18 @@ if __name__ == "__main__":
         print('+ Unable to access local NDA data base +')
         sys.exit(0)
 
-    # The NDAR database has some repeated series, with different IDs' get the last one
-    # For now I will take the first one
-    nda_id = rs_msg.split('\n', 1)[-1].strip()
-    print('nda_id =', nda_id, '\n' )
+    # The NDAR database has some repeated series with different IDs; orac_NDAR_db returns the IDs as a list of integers
+
+    # print( 'rs_msg = ', rs_msg )
+    # print( 'type(rs_msg):', type(rs_msg) )
+    # print( 'len(rs_msg) =', len(rs_msg) )
+
+    nda_id_list = ast.literal_eval( rs_msg )
+    # print('nda_id_list:', nda_id_list )
+
+    # Keep last nda_id, that presumably corresponds to last upload
+    nda_id = nda_id_list[-1]
+    print('nda_id =', nda_id )
 
     nda = NDA_db_metadata( db_name, nda_id )
     # ---------------------------------------------------------------------------------------------------------------
@@ -468,7 +439,6 @@ if __name__ == "__main__":
     # Record to upload requires format "04/06/2017 00:00:00", so convert
     datetime_orig = nda['INTERVIEW_DATE']
     dt_obj = datetime.datetime.strptime( datetime_orig, '%Y-%m-%d %H:%M:%S' )
-    # datetime_reformated = dt_obj.strftime( '%m/%d/%Y' )
     datetime_reformated = dt_obj.strftime( '%m/%d/%Y %H:%M:%S' )
 
 
@@ -512,7 +482,7 @@ if __name__ == "__main__":
               "pipeline_version": '245',
               "qc_fail_quest_reason": '',
               "qc_outcome":           'pass',
-              "derived_files": AWS_bucket + fname_bas,
+              "derived_files": AWS_bucket + fname_bas + '.tgz',
               "scan_type":     exp_scan,
               "img03_id2":     '',
               "file_source2":  '',
@@ -541,7 +511,7 @@ if __name__ == "__main__":
         s3_ok, s3_msg  =  AWS_file_upload( outtarname, AWS_bucket )
     else:
         s3_ok  = ''
-        s3_msg = 'AWS-s3 not attempted, because miNDA upload failed'
+        s3_msg = 'AWS-s3 not attempted because miNDA upload failed'
 
     print('s3_ok =', s3_ok)
     print('s3_msg:', s3_msg)
@@ -565,7 +535,7 @@ if __name__ == "__main__":
     # ---------------------------------------------------------------------------------------------------------------
 
     msg = "share_min_proc_data: End"
-    print( msg )
+    print( '\n', msg )
     log.info( msg )
     sys.exit(0)
 # ========================================================================================================================================================

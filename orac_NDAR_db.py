@@ -192,8 +192,10 @@ if optn == 'GetIDandRecs':   # Return records containing given file name
 if optn == 'GetID':   # Return NDAR ID corresponding to given file name
     dat = dat[ [fname == s.rsplit('/')[-1]  for s in dat['IMAGE_FILE']] ]
 
-    for rec in dat['IMAGE03_ID'].tolist():
-        print( rec )
+    print( dat['IMAGE03_ID'].tolist() )
+
+    # for rec in dat['IMAGE03_ID'].tolist():
+    #     print( rec )
     sys.exit(0)
 
 #--------------------------------------------------------------------------------------------------------
