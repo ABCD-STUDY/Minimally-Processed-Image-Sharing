@@ -63,3 +63,4 @@ rm file.tgz
 cd ..
 bids-validator  temp
 When test is complete, remove "temp"
+
